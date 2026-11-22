@@ -85,6 +85,7 @@ extern void dispatch_block_cancel(dispatch_block_t block);
 #import "PDJailbreak.h"
 #import "PDAssetInstaller.h"
 #import "PDZipExtract.h"
+#import "PDDiag.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -159,8 +160,8 @@ static id PDClassPerformSelector(Class cls, NSString *name) {
             NSString *orig = [root stringByAppendingPathComponent:@"originals/model.json"];
             NSString *clips = [root stringByAppendingPathComponent:@"clips.plist"];
             NSString *metal = [root stringByAppendingPathComponent:@"Whale.metal"];
-            NSLog(@"[PetDFY.Diag] root=%@", root);
-            NSLog(@"[PetDFY.Diag] live/model=%@ originals/model=%@ clips=%@ whale.metal=%@ outfit=%@ scheme=%@",
+            PDDiagLog(@"root=%@", root);
+            PDDiagLog(@"live/model=%@ originals/model=%@ clips=%@ whale.metal=%@ outfit=%@ scheme=%@",
                   [dfm fileExistsAtPath:live] ? @"Y" : @"N",
                   [dfm fileExistsAtPath:orig] ? @"Y" : @"N",
                   [dfm fileExistsAtPath:clips] ? @"Y" : @"N",
@@ -170,10 +171,10 @@ static id PDClassPerformSelector(Class cls, NSString *name) {
         PDPetView *pet = [[PDPetView alloc] initWithResourceURL:resURL];
         if (!pet) {
             _lastError = @"pet view init failed";
-            NSLog(@"[PetDFY.Diag] PDPetView init FAILED (renderer/rig nil) root=%@", root);
+            PDDiagLog(@"PDPetView init FAILED (renderer/rig nil) root=%@", root);
             return;
         }
-        NSLog(@"[PetDFY.Diag] PDPetView init OK size=%@", NSStringFromCGSize(pet.frame.size));
+        PDDiagLog(@"PDPetView init OK size=%@", NSStringFromCGSize(pet.frame.size));
         pet.frame = CGRectMake(0, 0, 104, 104);
         pet.doubleTapAction = _preferences.doubleTapAction ?: @"clip";
         pet.longPressAction = _preferences.longPressAction ?: @"menu";

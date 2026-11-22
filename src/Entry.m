@@ -6,12 +6,15 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import "PDOverlayController.h"
+#import "PDDiag.h"
 
 __attribute__((constructor))
 static void PetDFYEntry(void) {
     @autoreleasepool {
+        PDDiagLog(@"entry loaded (dylib injected into pid %d)", (int)getpid());
         dispatch_async(dispatch_get_main_queue(), ^{
             @autoreleasepool {
+                PDDiagLog(@"calling sharedController start");
                 [[PDOverlayController sharedController] start];
             }
         });

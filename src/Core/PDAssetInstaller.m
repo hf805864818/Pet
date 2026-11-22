@@ -5,6 +5,7 @@
 #import "PDAssetInstaller.h"
 #import "PDJailbreak.h"
 #import "PDZipExtract.h"
+#import "PDDiag.h"
 
 @interface PDAssetInstaller ()
 + (BOOL)mergeCopyDirectory:(NSString *)src to:(NSString *)dst error:(NSError **)error;
@@ -168,6 +169,27 @@ static NSString *const kPDAssetStateFileName = @".asset-state";
         }
     }
 
+    // 诊断：投递目录快照（只在变化时落盘，避免每秒刷屏）
+    {
+        static NSString *lastSig;
+        NSMutableArray *parts = [NSMutableArray array];
+        for (NSString *dir in [self spoolDirectories]) {
+            NSArray *names = [fm contentsOfDirectoryAtPath:dir error:NULL];
+            NSMutableArray *zips = [NSMutableArray array];
+            for (NSString *n in names) {
+                if ([[n.pathExtension lowercaseString] isEqualToString:@"zip"]) [zips addObject:n];
+            }
+            BOOL exists = names != nil;
+            [parts addObject:[NSString stringWithFormat:@"%@%@{%@}", exists ? @"" : @"!", dir,
+                              [zips componentsJoinedByString:@","]]];
+        }
+        NSString *sig = [parts componentsJoinedByString:@" | "];
+        if (![sig isEqualToString:lastSig]) {
+            lastSig = [sig copy];
+            PDDiagLog(@"spool: %@", sig);
+        }
+    }
+
     if (!newest) {
         if (message) *message = @"no zip in spool";
         return NO;
@@ -236,7 +258,7 @@ static NSString *const kPDAssetStateFileName = @".asset-state";
                                              @"error": err ?: @"structure"}];
         NSString *msgText = [NSString stringWithFormat:@"extract failed (%ld files, err=%@)", (long)n, err ?: @"structure"];
         if (message) *message = msgText;
-        NSLog(@"[PetDFY.Import] %@", msgText);
+        PDDiagLog(@"%@", msgText);
         return NO;
     }
 
@@ -281,13 +303,13 @@ static NSString *const kPDAssetStateFileName = @".asset-state";
         if (ok && [self assetRootIsComplete:target]) {
             installed++;
             if (!primary) primary = target;
-            NSLog(@"[PetDFY.Import] installed into %@", target);
+            PDDiagLog(@"installed into %@", target);
         } else if (ok) {
             // 合并只写进了部分文件（例如 bundle 根目录不可写、只写进了 originals/），
             // 这种半成品不能当作安装成功，否则渲染器会读到不完整的根。
-            NSLog(@"[PetDFY.Import] target incomplete after merge: %@", target);
+            PDDiagLog(@"target incomplete after merge: %@", target);
         } else {
-            NSLog(@"[PetDFY.Import] install failed for %@: %@", target, e.localizedDescription);
+            PDDiagLog(@"install failed for %@: %@", target, e.localizedDescription);
         }
     }
 
@@ -325,7 +347,7 @@ static NSString *const kPDAssetStateFileName = @".asset-state";
     if (installedRoot) *installedRoot = primary;
     NSString *msgText = [NSString stringWithFormat:@"installed %ld files -> %@", (long)n, primary];
     if (message) *message = msgText;
-    NSLog(@"[PetDFY.Import] %@", msgText);
+    PDDiagLog(@"%@", msgText);
     return YES;
 }
 
