@@ -28,6 +28,14 @@ echo "== 解开基础 deb 作为骨架 =="
 dpkg-deb -x "$BASE_DEB" "$WORK/layout"
 dpkg-deb -e "$BASE_DEB" "$WORK/layout/DEBIAN"
 
+# 防御：若骨架里出现 rootfs/ 前缀（某些打包方式会把 staging 目录一起打进 data.tar），
+# 会导致设备上 dpkg 去创建 ./rootfs/... 而 RootHide 的 rootfs 只读，安装必失败。
+if [ -d "$WORK/layout/rootfs" ]; then
+  echo "!! layout 含 rootfs/ 前缀，展开到根目录后再打包"
+  cp -R "$WORK/layout/rootfs/." "$WORK/layout/"
+  rm -rf "$WORK/layout/rootfs"
+fi
+
 echo "== 替换 dylib =="
 DL="$WORK/layout/Library/MobileSubstrate/DynamicLibraries"
 mkdir -p "$DL"

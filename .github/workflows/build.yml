@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -58,6 +58,55 @@ jobs:
           name: PetDFY-deb
           path: packages/*.deb
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="v1.2.1-3"
+          TITLE="PetDFY 1.2.1-3 · 素材导入修复"
+          DEB=$(ls -1 packages/*.deb | head -1)
+          [ -n "$DEB" ] || { echo "没有 deb 可发布" >&2; exit 1; }
+          BASE=$(basename "$DEB")
+          SHA=$(sha256sum "$DEB" | awk '{print $1}')
+
+          cat > /tmp/notes.md <<EOF
+          ## 修复内容
+          - 素材 ZIP 导入改为**进程内 zlib 解压**，不再依赖 /usr/bin/unzip（RootHide 下该路径不存在）
+          - 越狱根统一解析（rootful / /var/jb / .jbroot-* / /rootfs）
+          - 资源根按结构完整度选择，避免半写目录抢占导致角色不显示
+          - 导入双写 \`PetDFY.bundle\` 与 \`Imported/combined/current\`，导入后即时生效
+
+          ## 安装
+          \`\`\`
+          dpkg -i ${BASE}
+          \`\`\`
+          然后：设置 → 大肥鱼 → 下载 → 从文件导入 ZIP，选择素材包。
+
+          ## 校验
+          - 文件：\`${BASE}\`
+          - SHA256：\`${SHA}\`
+          - 构建提交：\`${GITHUB_SHA}\`
+          - 构建时间(UTC)：$(date -u +%FT%TZ)
+
+          ## 排查
+          \`\`\`
+          log stream --predicate 'eventMessage CONTAINS "PetDFY.Import"'
+          \`\`\`
+          成功会输出 \`[PetDFY.Import] installed N files -> <root>\`。
+
+          > 注意：当前 deb 为 arm64 单切片（arm64e 设备可正常加载）。未做真机功能验收。
+          EOF
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TITLE" --notes-file /tmp/notes.md --latest
+          else
+            gh release create "$TAG" --title "$TITLE" --notes-file /tmp/notes.md --latest
+          fi
+          gh release upload "$TAG" "$DEB" --clobber
+          echo "release: $(gh release view "$TAG" --json url -q .url)"
 
       - name: Upload build log
         if: always()

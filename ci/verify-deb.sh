@@ -16,6 +16,15 @@ dpkg-deb -f "$DEB"
 echo "== 内容清单 =="
 dpkg-deb -c "$DEB"
 
+echo "== 致命检查：rootfs 前缀 =="
+# 设备上 dpkg 会尝试创建 ./rootfs/...，RootHide/rootless 的 rootfs 只读 → 安装必失败
+if dpkg-deb -c "$DEB" | awk '{print $NF}' | grep -qE '^(\./)?rootfs(/|$)'; then
+  echo "FAIL: deb 内含 rootfs/ 前缀路径，安装会报 'error creating directory ./rootfs/...'" >&2
+  dpkg-deb -c "$DEB" | awk '{print $NF}' | grep -E '^(\./)?rootfs(/|$)' | head -10 >&2
+  exit 1
+fi
+echo "OK: 无 rootfs 前缀"
+
 TMP=$(mktemp -d)
 dpkg-deb -x "$DEB" "$TMP"
 
@@ -51,6 +60,30 @@ else:
     print(f"FAIL: 未知 magic {hex(magic)}"); sys.exit(1)
 print("ARCH OK")
 PY
+
+echo "== control 架构与实际切片一致性 =="
+CTRL_ARCH=$(dpkg-deb -f "$DEB" Architecture)
+echo "control Architecture: $CTRL_ARCH"
+case "$CTRL_ARCH" in
+  iphoneos-arm64e)
+    if ! python3 - "$DYLIB" <<'PY'
+import struct, sys
+d = open(sys.argv[1], "rb").read()
+m = struct.unpack_from("<I", d, 0)[0]
+if m == 0xBEBAFECA:
+    n = struct.unpack_from(">I", d, 4)[0]
+    subs = [struct.unpack_from(">II", d, 8 + i * 20) for i in range(n)]
+    ok = any(ct == 0x0100000C and cs == 0x80000002 for ct, cs in subs)
+else:
+    ct, cs = struct.unpack_from("<II", d, 4)
+    ok = (ct == 0x0100000C and cs == 0x80000002)
+sys.exit(0 if ok else 1)
+PY
+    then
+      echo "FAIL: control 声明 arm64e 但 dylib 无 arm64e 切片" >&2; exit 1
+    fi ;;
+esac
+echo "OK: 架构标注与切片一致"
 
 echo "== 注入过滤器 =="
 cat "$TMP/Library/MobileSubstrate/DynamicLibraries/PetDFY.plist"
