@@ -49,9 +49,13 @@ jobs:
           echo "using SDK: $SDK_SRC"
           cp -R "$SDK_SRC" "$THEOS/sdks/"
           ls -1 "$THEOS/sdks"
+          echo "--- theos tree ---"
+          ls -la "$THEOS" | head -20
           echo "--- toolchain ---"
-          ls "$THEOS/toolchain" || true
-          ls "$THEOS/toolchain/linux" 2>/dev/null || true
+          ls -la "$THEOS/toolchain" 2>&1 | head -10 || true
+          ls -la "$THEOS/toolchain/linux" 2>&1 | head -10 || true
+          echo "--- system clang ---"
+          which clang || true; clang --version | head -2 || true
           echo "$THEOS/bin" >> "$GITHUB_PATH"
 
       - name: Prepare layout from base deb
@@ -60,8 +64,14 @@ jobs:
       - name: Build package
         run: |
           set -o pipefail
+          SDK_DIR=$(basename "$(ls -d "$THEOS"/sdks/iPhoneOS*.sdk | tail -1)")
+          SDK_VER=${SDK_DIR#iPhoneOS}
+          SDK_VER=${SDK_VER%.sdk}
+          echo "TARGET SDK: $SDK_VER (dir $SDK_DIR)"
           make clean 2>&1 | tail -5 || true
-          make package FINALPACKAGE=1 DEBUG=0 2>&1 | tee build.log
+          make package FINALPACKAGE=1 DEBUG=0 \
+            TARGET="iphone:clang:${SDK_VER}:15.0" \
+            2>&1 | tee build.log
 
       - name: Verify deb
         run: bash ci/verify-deb.sh

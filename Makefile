@@ -3,7 +3,8 @@ FINALPACKAGE = 1
 DEBUG = 0
 
 ARCHS = arm64 arm64e
-TARGET = iphone:clang:16.0:15.0
+# 允许 CI 用命令行覆盖（CI 按实际存在的 SDK 目录名传入）
+TARGET ?= iphone:clang:16.5:15.0
 
 include $(THEOS)/makefiles/common.mk
 
