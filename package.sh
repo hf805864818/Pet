@@ -87,7 +87,33 @@ CTRL="$WORK/layout/DEBIAN/control"
 if [ -f "$CTRL" ]; then
   sed -i "s/^Architecture:.*/Architecture: iphoneos-${ARCH_SUFFIX}/" "$CTRL"
   sed -i "s/^Version:.*/Version: 1.2.1-3/" "$CTRL" || true
-  grep -E '^(Package|Name|Version|Architecture):' "$CTRL" || true
+
+  # 用仓库内 control 的展示字段覆盖骨架里的旧字段（Package/Depends 等保留骨架值）
+  if [ -f control ]; then
+    for key in Name Description Maintainer Author Section; do
+      val=$(grep -m1 "^${key}:" control | sed "s/^${key}:[[:space:]]*//" || true)
+      [ -n "${val:-}" ] || continue
+      if grep -q "^${key}:" "$CTRL"; then
+        # 用占位避免 sed 特殊字符问题
+        python3 - "$CTRL" "$key" "$val" <<'PY'
+import sys
+path, key, val = sys.argv[1], sys.argv[2], sys.argv[3]
+lines = open(path, encoding="utf-8").read().splitlines()
+out, done = [], False
+for l in lines:
+    if l.startswith(key + ":") and not done:
+        out.append(f"{key}: {val}")
+        done = True
+    else:
+        out.append(l)
+open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")
+PY
+      fi
+    done
+  fi
+
+  echo "---- control ----"
+  cat "$CTRL"
 fi
 
 echo "== 打包 =="
