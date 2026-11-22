@@ -131,6 +131,16 @@ jobs:
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TITLE" --notes-file /tmp/notes.md --latest
+            # 清掉本 tag 下的旧 deb 资产（避免 arm64 / arm64e 混着留，用户下错包）
+            for a in $(gh release view "$TAG" --json assets -q '.assets[].name'); do
+              case "$a" in
+                *.deb)
+                  if [ "$a" != "$BASE" ]; then
+                    echo "删除旧资产: $a"
+                    gh release delete-asset "$TAG" "$a" -y || true
+                  fi ;;
+              esac
+            done
           else
             gh release create "$TAG" --title "$TITLE" --notes-file /tmp/notes.md --latest
           fi
