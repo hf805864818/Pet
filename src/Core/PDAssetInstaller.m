@@ -6,6 +6,7 @@
 #import "PDJailbreak.h"
 #import "PDZipExtract.h"
 #import "PDDiag.h"
+#import "PDDiagnostics.h"
 
 @interface PDAssetInstaller ()
 + (BOOL)mergeCopyDirectory:(NSString *)src to:(NSString *)dst error:(NSError **)error;
@@ -259,6 +260,7 @@ static NSString *const kPDAssetStateFileName = @".asset-state";
         NSString *msgText = [NSString stringWithFormat:@"extract failed (%ld files, err=%@)", (long)n, err ?: @"structure"];
         if (message) *message = msgText;
         PDDiagLog(@"%@", msgText);
+        PDRecordImportResult(zipPath, NO, msgText, n);
         return NO;
     }
 
@@ -344,6 +346,7 @@ static NSString *const kPDAssetStateFileName = @".asset-state";
                                         @"root": primary ?: @"",
                                         @"files": @(n)}];
 
+    PDRecordImportResult(zipPath, YES, msgText, n);
     if (installedRoot) *installedRoot = primary;
     NSString *msgText = [NSString stringWithFormat:@"installed %ld files -> %@", (long)n, primary];
     if (message) *message = msgText;

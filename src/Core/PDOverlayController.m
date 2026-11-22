@@ -86,6 +86,7 @@ extern void dispatch_block_cancel(dispatch_block_t block);
 #import "PDAssetInstaller.h"
 #import "PDZipExtract.h"
 #import "PDDiag.h"
+#import "PDDiagnostics.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -172,9 +173,11 @@ static id PDClassPerformSelector(Class cls, NSString *name) {
         if (!pet) {
             _lastError = @"pet view init failed";
             PDDiagLog(@"PDPetView init FAILED (renderer/rig nil) root=%@", root);
+            PDRecordRenderState(NO, NO, @"PDPetView/renderer 初始化失败");
             return;
         }
         PDDiagLog(@"PDPetView init OK size=%@", NSStringFromCGSize(pet.frame.size));
+        PDRecordRenderState(YES, YES, nil);
         pet.frame = CGRectMake(0, 0, 104, 104);
         pet.doubleTapAction = _preferences.doubleTapAction ?: @"clip";
         pet.longPressAction = _preferences.longPressAction ?: @"menu";
