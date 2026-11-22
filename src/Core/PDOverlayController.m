@@ -150,12 +150,30 @@ static id PDClassPerformSelector(Class cls, NSString *name) {
 
     // 首次创建时建桌宠
     if (!_pet) {
-        NSURL *resURL = [NSURL fileURLWithPath:PDResourceBundlePath() isDirectory:YES];
+        NSString *root = PDResourceBundlePath();
+        NSURL *resURL = [NSURL fileURLWithPath:root isDirectory:YES];
+        // 诊断：把资源根与关键文件存在性打到 Console，便于真机排障
+        {
+            NSFileManager *dfm = [NSFileManager defaultManager];
+            NSString *live = [root stringByAppendingPathComponent:@"live/model.json"];
+            NSString *orig = [root stringByAppendingPathComponent:@"originals/model.json"];
+            NSString *clips = [root stringByAppendingPathComponent:@"clips.plist"];
+            NSString *metal = [root stringByAppendingPathComponent:@"Whale.metal"];
+            NSLog(@"[PetDFY.Diag] root=%@", root);
+            NSLog(@"[PetDFY.Diag] live/model=%@ originals/model=%@ clips=%@ whale.metal=%@ outfit=%@ scheme=%@",
+                  [dfm fileExistsAtPath:live] ? @"Y" : @"N",
+                  [dfm fileExistsAtPath:orig] ? @"Y" : @"N",
+                  [dfm fileExistsAtPath:clips] ? @"Y" : @"N",
+                  [dfm fileExistsAtPath:metal] ? @"Y" : @"N",
+                  _preferences.outfit ?: @"?", _preferences.scheme ?: @"?");
+        }
         PDPetView *pet = [[PDPetView alloc] initWithResourceURL:resURL];
         if (!pet) {
             _lastError = @"pet view init failed";
+            NSLog(@"[PetDFY.Diag] PDPetView init FAILED (renderer/rig nil) root=%@", root);
             return;
         }
+        NSLog(@"[PetDFY.Diag] PDPetView init OK size=%@", NSStringFromCGSize(pet.frame.size));
         pet.frame = CGRectMake(0, 0, 104, 104);
         pet.doubleTapAction = _preferences.doubleTapAction ?: @"clip";
         pet.longPressAction = _preferences.longPressAction ?: @"menu";

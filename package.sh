@@ -64,6 +64,55 @@ else
   echo "  警告: 未找到 ldid，跳过签名" >&2
 fi
 
+echo "== 修正设置面板的服装列表（4 套 -> 15 套） =="
+PREFS_PLIST="$WORK/layout/Library/PreferenceBundles/PetDFYPrefs.bundle/Root.plist"
+if [ -f "$PREFS_PLIST" ]; then
+  python3 - "$PREFS_PLIST" <<'PY'
+import plistlib, sys
+
+path = sys.argv[1]
+with open(path, "rb") as f:
+    data = plistlib.load(f)
+
+OUTFITS = [
+    ("maid",          "女仆装"),
+    ("cape",          "冬装"),
+    ("crew",          "店员装"),
+    ("sailor",        "JK 水手服"),
+    ("miko",          "深海巫女"),
+    ("dragon",        "幻月龙姬"),
+    ("nurse",         "深海护士"),
+    ("winter_deep",   "深海冬雪"),
+    ("violet_winter", "紫月冬雪"),
+    ("frost_dragon",  "霜龙冬眠"),
+    ("formal",        "深海礼装"),
+    ("starsea",       "星海少女"),
+    ("eclipse",       "月蚀魔女"),
+    ("night_gala",    "夜潮礼裙"),
+    ("pale_nurse",    "霜华看护"),
+]
+values = [v for v, _ in OUTFITS]
+titles = [t for _, t in OUTFITS]
+
+changed = False
+for item in data.get("items", []):
+    if item.get("key") == "Outfit":
+        item["validValues"] = values
+        item["validTitles"] = titles
+        changed = True
+
+if not changed:
+    print("  !! 没找到 Outfit 项，跳过")
+    sys.exit(0)
+
+with open(path, "wb") as f:
+    plistlib.dump(data, f, fmt=plistlib.FMT_BINARY)
+print(f"  Outfit 列表已扩展到 {len(values)} 套")
+PY
+else
+  echo "  !! 未找到 PetDFYPrefs.bundle/Root.plist"
+fi
+
 echo "== 依据实际切片设置包架构 =="
 ARCH_SUFFIX=$(python3 - "$DL/PetDFY.dylib" <<'PY'
 import struct, sys
