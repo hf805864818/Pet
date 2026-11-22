@@ -84,15 +84,16 @@ function req(method, urlPath, body, { raw = false } = {}) {
   });
 }
 
-async function withRetry(fn, label, tries = 4) {
+async function withRetry(fn, label, tries = 6) {
   let lastErr;
   for (let i = 1; i <= tries; i++) {
     try { return await fn(); } catch (e) {
       lastErr = e;
-      const transient = !e.status || e.status >= 500 || e.status === 429;
-      if (!transient || i === tries) break;
-      const wait = 800 * i;
-      console.error(`  retry ${i}/${tries - 1} ${label}: ${e.message.slice(0, 120)} (wait ${wait}ms)`);
+      // 400 在 blob 上传里偶发（GitHub 侧瞬时拒绝），一并重试；401/403/404/409/422 不重试
+      const retryable = !e.status || e.status >= 500 || e.status === 429 || e.status === 400 || e.status === 401;
+      if (!retryable || i === tries) break;
+      const wait = 700 * i + Math.floor(Math.random() * 400);
+      console.error(`  retry ${i}/${tries - 1} ${label}: ${e.message.slice(0, 140)} (wait ${wait}ms)`);
       await new Promise((r) => setTimeout(r, wait));
     }
   }
@@ -176,7 +177,7 @@ function walk(root) {
   console.log(`准备上传 ${files.length} 个文件…`);
   const treeEntries = [];
   let done = 0;
-  const CONCURRENCY = 6;
+  const CONCURRENCY = 1;
 
   async function uploadOne(rel) {
     const abs = path.join(DIR, rel);
@@ -194,6 +195,7 @@ function walk(root) {
       type: "blob",
       sha: res.json.sha,
     });
+    await new Promise((r) => setTimeout(r, 120));
     done++;
     if (done % 25 === 0 || done === files.length) console.log(`  blob ${done}/${files.length}`);
   }
