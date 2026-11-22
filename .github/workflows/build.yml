@@ -21,11 +21,40 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             make git curl ca-certificates xz-utils unzip \
             libssl-dev libplist-dev libc6-dev binutils \
-            dpkg-dev fakeroot python3 \
-            clang lld llvm
+            dpkg-dev fakeroot python3 || true
+          # 关键：clang 与 ld64.lld 必须同版本，否则 arm64e 的 ptrauth 重定位
+          # 会报 "INVALID relocation has width 8 bytes"（R_LENGTH 语义不一致）。
+          for v in 18 19 20 21; do
+            if sudo apt-get install -y --no-install-recommends \
+                 clang-$v lld-$v llvm-$v 2>/dev/null; then
+              if [ -x "/usr/bin/clang-$v" ] && [ -x "/usr/bin/ld64.lld-$v" ]; then
+                echo "MATCHED_LLVM=$v" >> "$GITHUB_ENV"
+                break
+              fi
+            fi
+          done
           echo "--- tools ---"
-          which clang ld64.lld llvm-lipo llvm-strip dpkg-deb || true
+          which clang ld64.lld llvm-lipo dpkg-deb || true
+          ls /usr/bin/clang-* /usr/bin/ld64.lld-* 2>/dev/null || true
+
+      - name: Pin matched clang + ld64.lld
+        run: |
+          set -euo pipefail
+          V="${MATCHED_LLVM:-}"
+          if [ -n "$V" ] && [ -x "/usr/bin/clang-$V" ] && [ -x "/usr/bin/ld64.lld-$V" ]; then
+            sudo ln -sf "/usr/bin/clang-$V"      /usr/local/bin/clang
+            sudo ln -sf "/usr/bin/clang++-$V"    /usr/local/bin/clang++ 2>/dev/null || true
+            sudo ln -sf "/usr/bin/ld64.lld-$V"   /usr/local/bin/ld64.lld
+            sudo ln -sf "/usr/bin/llvm-lipo-$V"  /usr/local/bin/llvm-lipo 2>/dev/null || true
+            sudo ln -sf "/usr/bin/llvm-strip-$V" /usr/local/bin/llvm-strip 2>/dev/null || true
+            echo "CC=/usr/local/bin/clang" >> "$GITHUB_ENV"
+            echo "== pinned LLVM $V =="
+          else
+            echo "!! 没有找到同版本的 clang/lld，回退系统默认"
+            echo "CC=clang" >> "$GITHUB_ENV"
+          fi
           clang --version | head -2
+          ld64.lld --version 2>&1 | head -2 || ld64.lld -v 2>&1 | head -2
 
       - name: Install ldid
         run: |
