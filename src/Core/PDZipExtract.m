@@ -269,7 +269,7 @@ static NSString *PDZipSafeRelative(NSString *name, NSString **rejectReason) {
 
         if (!name.length) continue;
         NSString *lower = name.lowercaseString;
-        if ([lower hasPrefix:@"__macosx/"] || [lower isEqualToString:".ds_store"] ||
+        if ([lower hasPrefix:@"__macosx/"] || [lower isEqualToString:@".ds_store"] ||
             [lower hasSuffix:@"/.ds_store"]) {
             continue;
         }
