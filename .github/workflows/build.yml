@@ -126,7 +126,7 @@ jobs:
           \`\`\`
           成功会输出 \`[PetDFY.Import] installed N files -> <root>\`。
 
-          > 注意：当前 deb 为 arm64 单切片（arm64e 设备可正常加载）。未做真机功能验收。
+          > 注意：deb 含 arm64 + arm64e 双切片；未做真机功能验收。
           EOF
 
           if gh release view "$TAG" >/dev/null 2>&1; then

@@ -72,6 +72,23 @@ for ARCH in $ARCHS; do
         $FRAMEWORKS \
         -o "$OUT" "$OBJ"/*.o ; then
         echo "链接 OK: $ARCH"
+        # ld64.lld 会把 arm64e 输出写成 subtype=0（而 .o 是 subtype=0x2，确为 arm64e ABI）。
+        # 按 Apple ld64 的约定规范化为 0x80000002（arm64e + ptrauth ABI v0），
+        # 否则打包架构只能是 iphoneos-arm64，arm64e 设备需用 Patcher 改包才能装。
+        if [ "$ARCH" = "arm64e" ]; then
+            python3 - "$OUT" <<'PY'
+import struct, sys
+p = sys.argv[1]
+d = bytearray(open(p, "rb").read())
+ct, cs = struct.unpack_from("<II", d, 4)
+if ct == 0x0100000C and cs != 0x80000002:
+    struct.pack_into("<I", d, 8, 0x80000002)
+    open(p, "wb").write(bytes(d))
+    print(f"  normalized subtype: {hex(cs)} -> 0x80000002")
+else:
+    print(f"  subtype already {hex(cs)}")
+PY
+        fi
         hdr "$OUT"
         SLICES="$SLICES $OUT"
     else
