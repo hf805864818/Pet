@@ -1,24 +1,21 @@
 #!/bin/bash
 #
-# package.sh — 把编译产物打成可安装 deb
+# package.sh — 把编译产物打成可安装 deb（无 theos 依赖）
 #
 # 用法：
 #   ./package.sh <基础 deb>
 #
 # 说明：
 #   本工程只包含 dylib 源码，不含设置面板（PreferenceBundle）源码。
-#   设置面板与 Whale.metal / 素材 bundle 骨架需要从基础 deb 里取，
-#   因此这里接受一个基础 deb 作为骨架，用本次编译的 PetDFY.dylib 替换进去。
-#
-#   基础 deb 建议用能正常导入素材的那份（PetDFY_1.2.1_RootHide.deb），
-#   这样设置面板的“从文件导入 ZIP”行为与真机验证过的一致。
+#   设置面板与 Whale.metal / 素材 bundle 骨架从基础 deb 取，
+#   用本次编译的 build/PetDFY.dylib 替换进去。
 #
 set -eu
 
 BASE_DEB="${1:-}"
 [ -n "$BASE_DEB" ] || { echo "用法: ./package.sh <基础 deb>" >&2; exit 2; }
 [ -f "$BASE_DEB" ] || { echo "找不到基础 deb: $BASE_DEB" >&2; exit 2; }
-[ -f build/PetDFY.dylib ] || { echo "先运行 ./build.sh 生成 build/PetDFY.dylib" >&2; exit 2; }
+[ -f build/PetDFY.dylib ] || { echo "先构建 build/PetDFY.dylib" >&2; exit 2; }
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
@@ -36,7 +33,6 @@ DL="$WORK/layout/Library/MobileSubstrate/DynamicLibraries"
 mkdir -p "$DL"
 cp -f build/PetDFY.dylib "$DL/PetDFY.dylib"
 
-# 注入过滤器（若基础包没带）
 if [ ! -f "$DL/PetDFY.plist" ]; then
   cat > "$DL/PetDFY.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -53,26 +49,58 @@ if [ ! -f "$DL/PetDFY.plist" ]; then
 PLIST
 fi
 
-echo "== 签名（ldid adhoc） =="
+echo "== 签名 =="
 if command -v ldid >/dev/null 2>&1; then
-  ldid -S "$DL/PetDFY.dylib"
+  ldid -S "$DL/PetDFY.dylib" && echo "ldid ok"
 else
   echo "  警告: 未找到 ldid，跳过签名" >&2
 fi
 
-echo "== 修正 control =="
+echo "== 依据实际切片设置包架构 =="
+ARCH_SUFFIX=$(python3 - "$DL/PetDFY.dylib" <<'PY'
+import struct, sys
+d = open(sys.argv[1], "rb").read()
+magic = struct.unpack_from("<I", d, 0)[0]
+if magic == 0xBEBAFECA:
+    n = struct.unpack_from(">I", d, 4)[0]
+    names = []
+    for i in range(n):
+        ct = struct.unpack_from(">5I", d, 8 + i * 20)[0]
+        names.append({0x0100000C: "arm64e" if False else "arm64"}.get(ct, "other"))
+    # fat 里有 arm64 就可能同时含 arm64e，用 subtype 判断
+    subs = []
+    for i in range(n):
+        ct, cs = struct.unpack_from(">II", d, 8 + i * 20)
+        subs.append((ct, cs))
+    has_arm64e = any(ct == 0x0100000C and cs == 0x80000002 for ct, cs in subs)
+    print("arm64e" if has_arm64e else "arm64")
+elif magic == 0xFEEDFACF:
+    ct, cs = struct.unpack_from("<II", d, 4)
+    print("arm64e" if (ct == 0x0100000C and cs == 0x80000002) else "arm64")
+else:
+    print("arm64")
+PY
+)
+echo "detected arch: iphoneos-$ARCH_SUFFIX"
+
 CTRL="$WORK/layout/DEBIAN/control"
 if [ -f "$CTRL" ]; then
-  # 保留基础包元数据，只确保架构与版本可辨识
-  sed -i '' 's/^Architecture:.*/Architecture: iphoneos-arm64e/' "$CTRL" 2>/dev/null || \
-  sed -i 's/^Architecture:.*/Architecture: iphoneos-arm64e/' "$CTRL"
+  sed -i "s/^Architecture:.*/Architecture: iphoneos-${ARCH_SUFFIX}/" "$CTRL"
+  sed -i "s/^Version:.*/Version: 1.2.1-3/" "$CTRL" || true
+  grep -E '^(Package|Name|Version|Architecture):' "$CTRL" || true
 fi
 
 echo "== 打包 =="
 OUT="packages/out"
 mkdir -p "$OUT"
-DEB="$OUT/PetDFY_1.2.1_assetimport-fix_iphoneos-arm64e.deb"
+DEB="$OUT/PetDFY_1.2.1_assetimport-fix_iphoneos-${ARCH_SUFFIX}.deb"
+rm -f "$DEB"
 dpkg-deb -bZxz "$WORK/layout" "$DEB"
 echo "产物: $DEB"
 ls -la "$DEB"
-shasum -a 256 "$DEB" || sha256sum "$DEB"
+sha256sum "$DEB" 2>/dev/null || shasum -a 256 "$DEB"
+
+# 给 workflow 用
+mkdir -p packages
+cp -f "$DEB" "packages/$(basename "$DEB")"
+ls -la packages/
