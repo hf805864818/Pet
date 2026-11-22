@@ -9,12 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  # ── 主线：Linux + 系统 clang + ld64.lld 组成 Darwin 工具链 ──
-  build-linux:
-    name: build (ubuntu / clang + ld64.lld)
+  build:
+    name: build deb (ubuntu + clang/ld64.lld)
     runs-on: ubuntu-latest
-    env:
-      THEOS: ${{ github.workspace }}/theos
     steps:
       - uses: actions/checkout@v4
 
@@ -22,14 +19,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            make git curl ca-certificates xz-utils \
+            make git curl ca-certificates xz-utils unzip \
             libssl-dev libplist-dev libc6-dev binutils \
             dpkg-dev fakeroot python3 \
             clang lld llvm
           echo "--- tools ---"
-          which clang ld64.lld llvm-lipo || true
+          which clang ld64.lld llvm-lipo llvm-strip dpkg-deb || true
           clang --version | head -2
-          ld64.lld --version 2>&1 | head -2 || true
 
       - name: Install ldid
         run: |
@@ -39,77 +35,34 @@ jobs:
           sudo chmod +x /usr/local/bin/ldid
           ldid -h 2>&1 | head -3 || true
 
-      - name: Setup theos + SDK + toolchain shim
+      - name: Fetch iOS SDK
         run: |
           set -euo pipefail
-          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
           git clone --depth 1 https://github.com/theos/sdks.git /tmp/sdks
-          mkdir -p "$THEOS/sdks"
-          cp -R "$(ls -d /tmp/sdks/iPhoneOS16*.sdk | tail -1)" "$THEOS/sdks/"
-          ls -1 "$THEOS/sdks"
+          mkdir -p sdks
+          cp -R "$(ls -d /tmp/sdks/iPhoneOS16*.sdk | tail -1)" sdks/
+          ls -1 sdks
+          echo "IOS_SDK=$PWD/$(ls -d sdks/iPhoneOS*.sdk | tail -1)" >> "$GITHUB_ENV"
 
-          # 用系统 clang + ld64.lld 组成 theos 期望的 toolchain 目录
-          TC="$THEOS/toolchain/linux/iphone/bin"
-          mkdir -p "$TC"
-          ln -sf "$(command -v clang)"        "$TC/clang"
-          ln -sf "$(command -v clang++)"      "$TC/clang++" 2>/dev/null || true
-          ln -sf "$(command -v ld64.lld)"     "$TC/ld"
-          ln -sf "$(command -v llvm-lipo)"    "$TC/lipo"
-          ln -sf "$(command -v llvm-strip)"   "$TC/strip" 2>/dev/null || \
-            ln -sf "$(command -v strip)"      "$TC/strip"
-          ln -sf "$(command -v llvm-ar)"      "$TC/ar" 2>/dev/null || \
-            ln -sf "$(command -v ar)"         "$TC/ar"
-          ln -sf "$(command -v llvm-nm)"      "$TC/nm" 2>/dev/null || \
-            ln -sf "$(command -v nm)"         "$TC/nm"
-          ls -la "$TC"
-          echo "$THEOS/bin" >> "$GITHUB_PATH"
-
-      - name: Build package
-        run: bash ci/build-theos.sh
+      - name: Build dylib + package deb
+        run: |
+          set -o pipefail
+          bash ci/build-native.sh 2>&1 | tee build.log
 
       - name: Verify deb
         run: bash ci/verify-deb.sh
 
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
         with:
-          name: deb-linux
-          path: |
-            packages/*.deb
-            build.log
-          if-no-files-found: warn
+          name: PetDFY-deb
+          path: packages/*.deb
+          if-no-files-found: error
 
-  # ── 备选：macOS runner（若账号允许）──
-  build-macos:
-    name: build (macos-13)
-    runs-on: macos-13
-    continue-on-error: true
-    env:
-      THEOS: ${{ github.workspace }}/theos
-    steps:
-      - uses: actions/checkout@v4
-      - name: Runner info
-        run: sw_vers; uname -m; xcodebuild -version || true
-      - name: Install deps
-        run: brew install ldid dpkg xz || true
-      - name: Setup theos + SDK
-        run: |
-          set -euo pipefail
-          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
-          git clone --depth 1 https://github.com/theos/sdks.git /tmp/sdks
-          mkdir -p "$THEOS/sdks"
-          cp -R "$(ls -d /tmp/sdks/iPhoneOS16*.sdk | tail -1)" "$THEOS/sdks/"
-          ls -1 "$THEOS/sdks"
-          echo "$THEOS/bin" >> "$GITHUB_PATH"
-      - name: Build package
-        run: bash ci/build-theos.sh
-      - name: Verify deb
-        run: bash ci/verify-deb.sh
-      - uses: actions/upload-artifact@v4
+      - name: Upload build log
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: deb-macos
-          path: |
-            packages/*.deb
-            build.log
-          if-no-files-found: warn
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
