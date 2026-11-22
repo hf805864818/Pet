@@ -1,0 +1,11 @@
+{
+  "init_reads_saved_preference": true,
+  "init_no_nil_outfitinfo": true,
+  "switch_updates_model_metadata": true,
+  "empty_selection_rejected": true,
+  "no_silent_maid_on_switch": true,
+  "preflight_before_texture_cache_reset": true,
+  "runtime_test": false,
+  "compiled": false,
+  "original_outfitinfo_recovered": false
+}

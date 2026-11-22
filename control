@@ -1,0 +1,13 @@
+Package: com.ojbkclub.petdfy
+Name: 大肥鱼〇V〇（素材导入修复）
+Version: 1.2.1-3
+Architecture: iphoneos-arm64e
+Description: 大肥鱼〇V〇 桌面宠物 · 素材导入修复版
+ 【修复】素材 ZIP 导入改为进程内解压，不再依赖 /usr/bin/unzip；
+ RootHide 越狱根路径统一解析；资源根按结构完整度选择，避免半成品抢占；
+ 导入产物双写素材 bundle 与既有 Imported 目录，导入后即时生效。
+ 【保留】主题换装、触摸互动、动作音效、AI 对话、语音、设备操控等原有功能。
+Maintainer: hf805864818
+Author: hf805864818
+Section: Tweaks
+Depends: mobilesubstrate, preferenceloader, firmware (>= 16.0)

@@ -1,0 +1,76 @@
+name: build-deb
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: theos build (arm64 + arm64e)
+    runs-on: macos-14
+    env:
+      THEOS: ${{ github.workspace }}/theos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          uname -m
+          xcodebuild -version || true
+          xcrun clang --version || true
+
+      - name: Install dependencies
+        run: |
+          brew update >/dev/null 2>&1 || true
+          brew install ldid dpkg xz || true
+          which ldid; which dpkg-deb; which xz || true
+
+      - name: Setup theos + iOS SDK
+        run: |
+          set -euo pipefail
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
+          git clone --depth 1 https://github.com/theos/sdks.git /tmp/sdks
+          mkdir -p "$THEOS/sdks"
+          if [ -d /tmp/sdks/iPhoneOS16.5.sdk ]; then
+            cp -R /tmp/sdks/iPhoneOS16.5.sdk "$THEOS/sdks/"
+          else
+            cp -R "$(ls -d /tmp/sdks/iPhoneOS16*.sdk | tail -1)" "$THEOS/sdks/"
+          fi
+          ls -1 "$THEOS/sdks"
+          echo "$THEOS/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare layout from base deb
+        run: bash ci/prepare-layout.sh
+
+      - name: Build package
+        run: |
+          set -o pipefail
+          make clean 2>&1 | tail -5 || true
+          make package FINALPACKAGE=1 DEBUG=0 2>&1 | tee build.log
+          echo "---- exit: $? ----"
+
+      - name: Verify deb
+        run: bash ci/verify-deb.sh
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: PetDFY-deb
+          path: packages/*.deb
+          if-no-files-found: error
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            build.log
+            .theos/obj/**/*.log
+          if-no-files-found: ignore
