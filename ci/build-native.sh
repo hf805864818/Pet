@@ -159,39 +159,5 @@ echo "===== 签名 ====="
 ldid -S build/PetDFY.dylib
 echo "signed"
 
-echo "===== 构建设置面板诊断页（PetDFYDiag.bundle）====="
-DIAG_OK=0
-for ARCH in arm64e arm64; do
-    if $CC -target "${ARCH}-apple-ios${MIN_IOS}" -isysroot "$IOS_SDK" \
-        -bundle -fobjc-arc -O2 -Wno-everything -fuse-ld=lld \
-        -Wl,-undefined,dynamic_lookup \
-        -framework Foundation -framework UIKit \
-        -o build/PetDFYDiag prefs-diag/PDDiagController.m 2>build/diag-build.log ; then
-        echo "诊断页构建 OK ($ARCH)"
-        ldid -S build/PetDFYDiag || true
-        DIAG_OK=1
-        break
-    else
-        echo "WARN: 诊断页 $ARCH 构建失败，可改用 dylib 形式重试" >&2
-        tail -5 build/diag-build.log >&2 || true
-    fi
-done
-if [ "$DIAG_OK" != "1" ]; then
-    # 回退：用 -dynamiclib 产物当 bundle 可执行文件（Preferences 能以 dylib 载入）
-    for ARCH in arm64e arm64; do
-        if $CC -target "${ARCH}-apple-ios${MIN_IOS}" -isysroot "$IOS_SDK" \
-            -dynamiclib -fobjc-arc -O2 -Wno-everything -fuse-ld=lld \
-            -Wl,-undefined,dynamic_lookup \
-            -framework Foundation -framework UIKit \
-            -o build/PetDFYDiag prefs-diag/PDDiagController.m ; then
-            echo "诊断页构建 OK (dylib 回退, $ARCH)"
-            ldid -S build/PetDFYDiag || true
-            DIAG_OK=1
-            break
-        fi
-    done
-fi
-[ "$DIAG_OK" = "1" ] || echo "WARN: 诊断页彻底构建失败，包内将不含诊断页" >&2
-
 echo "===== 打包 deb ====="
 bash package.sh vendor/base/PetDFY_1.2.1_RootHide.deb

@@ -7,11 +7,13 @@
 #import "PDZipExtract.h"
 #import "PDDiag.h"
 #import "PDDiagnostics.h"
+#import "PDToast.h"
 
 @interface PDAssetInstaller ()
 + (BOOL)mergeCopyDirectory:(NSString *)src to:(NSString *)dst error:(NSError **)error;
 + (NSString *)tokenForArchive:(NSString *)zipPath;
 + (void)writeStatus:(NSString *)status detail:(NSDictionary *)detail;
++ (NSString *)findArchiveRecursively;
 @end
 
 static NSString *const kPDAssetPrefsDomain   = @"com.susudear.petdfyprefs";
@@ -44,6 +46,50 @@ static NSString *const kPDAssetStateFileName = @".asset-state";
         }
     }
     return dirs;
+}
+
++ (NSString *)findArchiveRecursively {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *bases = @[
+        @"/var/mobile/Documents",
+        @"/var/mobile/Downloads",
+        @"/var/mobile/tmp",
+        @"/var/mobile/Library/Application Support/PetDFY",
+        @"/tmp",
+    ];
+    NSString *best = nil;
+    NSTimeInterval bestT = -1;
+    NSInteger budget = 4000;
+
+    for (NSString *base in bases) {
+        NSMutableArray *queue = [NSMutableArray arrayWithObject:@[@(0), base]];
+        while (queue.count && budget > 0) {
+            NSArray *item = queue.firstObject;
+            [queue removeObjectAtIndex:0];
+            NSInteger depth = [item[0] integerValue];
+            NSString *dir = item[1];
+            NSArray *kids = [fm contentsOfDirectoryAtPath:dir error:NULL];
+            if (!kids) continue;
+            for (NSString *k in kids) {
+                if (--budget <= 0) break;
+                if ([k hasPrefix:@"."]) continue;
+                NSString *p = [dir stringByAppendingPathComponent:k];
+                BOOL isDir = NO;
+                if (![fm fileExistsAtPath:p isDirectory:&isDir]) continue;
+                if (isDir) {
+                    if (depth < 3) [queue addObject:@[@(depth + 1), p]];
+                    continue;
+                }
+                if (![[k.pathExtension lowercaseString] isEqualToString:@"zip"]) continue;
+                NSDictionary *a = [fm attributesOfItemAtPath:p error:NULL];
+                if ([a[NSFileSize] unsignedLongLongValue] < 4096) continue;
+                NSTimeInterval t = [a[NSFileModificationDate] timeIntervalSince1970];
+                if (t > bestT) { bestT = t; best = p; }
+            }
+        }
+    }
+    if (best) PDDiagLog(@"recursive find: %@", best);
+    return best;
 }
 
 + (BOOL)assetRootIsComplete:(NSString *)root {
@@ -192,6 +238,15 @@ static NSString *const kPDAssetStateFileName = @".asset-state";
     }
 
     if (!newest) {
+        // 兜底：设置面板可能把 ZIP 放在别处，做一次有界递归扫描
+        NSString *found = [self findArchiveRecursively];
+        if (found) {
+            newest = found;
+            newestTime = [[NSDate date] timeIntervalSince1970];
+            PDDiagLog(@"spool empty, fallback zip=%@", found);
+        }
+    }
+    if (!newest) {
         if (message) *message = @"no zip in spool";
         return NO;
     }
@@ -261,6 +316,12 @@ static NSString *const kPDAssetStateFileName = @".asset-state";
         if (message) *message = msgText;
         PDDiagLog(@"%@", msgText);
         PDRecordImportResult(zipPath, NO, msgText, n);
+        {
+            NSString *shortText = [NSString stringWithFormat:
+                @"素材导入失败\n文件: %@\n原因: %@\n解出: %ld 个\n\n点一下关闭",
+                zipPath.lastPathComponent, msgText ?: @"-", (long)n];
+            PDShowToast(shortText, 20);
+        }
         return NO;
     }
 
@@ -351,6 +412,12 @@ static NSString *const kPDAssetStateFileName = @".asset-state";
     if (installedRoot) *installedRoot = primary;
     if (message) *message = msgText;
     PDDiagLog(@"%@", msgText);
+    {
+        NSString *shortText = [NSString stringWithFormat:
+            @"素材导入成功\n文件: %@\n解出: %ld 个\n安装到:\n%@\n\n点一下关闭",
+            zipPath.lastPathComponent, (long)n, primary ?: @"-"];
+        PDShowToast(shortText, 15);
+    }
     return YES;
 }
 

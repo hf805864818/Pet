@@ -64,21 +64,6 @@ else
   echo "  警告: 未找到 ldid，跳过签名" >&2
 fi
 
-echo "== 安装诊断页 bundle =="
-DIAG_BIN="build/PetDFYDiag"
-if [ -f "$DIAG_BIN" ]; then
-  DIAG_BUNDLE="$WORK/layout/Library/PreferenceBundles/PetDFYDiag.bundle"
-  mkdir -p "$DIAG_BUNDLE"
-  cp -f "$DIAG_BIN" "$DIAG_BUNDLE/PetDFYDiag"
-  cp -f prefs-diag/Info.plist "$DIAG_BUNDLE/Info.plist"
-  mkdir -p "$WORK/layout/Library/PreferenceLoader/Preferences"
-  cp -f prefs-diag/PetDFYDiag.plist "$WORK/layout/Library/PreferenceLoader/Preferences/PetDFYDiag.plist"
-  if command -v ldid >/dev/null 2>&1; then ldid -S "$DIAG_BUNDLE/PetDFYDiag" || true; fi
-  echo "  已加入 素材诊断 页面"
-else
-  echo "  警告: 没有 build/PetDFYDiag，跳过诊断页" >&2
-fi
-
 echo "== 修正设置面板的服装列表（4 套 -> 15 套） =="
 PREFS_PLIST="$WORK/layout/Library/PreferenceBundles/PetDFYPrefs.bundle/Root.plist"
 if [ -f "$PREFS_PLIST" ]; then
