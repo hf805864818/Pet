@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 #
-# ci/build-native.sh — 不依赖 theos，用 clang + ld64.lld 交叉编译 iOS tweak
+# ci/build-native.sh — clang + ld64.lld 交叉编译 iOS tweak（不依赖 theos）
 #
-#   ARCHS 可指定，默认 "arm64 arm64e"。
-#   arm64e 需要 clang 与 ld64.lld 同版本（否则 ptrauth 重定位报 INVALID relocation）。
-#   拼 fat 用脚本自行完成（llvm-lipo 对 arm64/arm64e 子类型判定不稳）。
+#  重要：clang 以 -target arm64e 编译出的 .o 确实带 arm64e ABI，
+#  但 ld64.lld 链接输出的 Mach-O 里没有真正的 PAC 指令（pacibsp/autibsp=0），
+#  把 header 改写成 arm64e 属于「假 arm64e」，dyld 可能直接拒绝加载。
+#  因此默认只出 arm64 切片：arm64 在 arm64e 设备上可正常加载。
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 : "${IOS_SDK:?IOS_SDK 未设置（指向 iPhoneOS*.sdk 目录）}"
 MIN_IOS="${MIN_IOS:-15.0}"
-ARCHS="${ARCHS:-arm64 arm64e}"
+ARCHS="${ARCHS:-arm64}"
 CC="${CC:-clang}"
 
 [ -d "$IOS_SDK" ] || { echo "IOS_SDK 不存在: $IOS_SDK" >&2; exit 2; }
@@ -34,10 +35,7 @@ d = open(sys.argv[1], "rb").read(32)
 m = struct.unpack_from("<I", d, 0)[0]
 if m == 0xFEEDFACF:
     ct, cs = struct.unpack_from("<II", d, 4)
-    names = {0x0100000C: "arm64"}
     print(f"  {sys.argv[1]}: cputype={hex(ct)} subtype={hex(cs)}")
-elif m == 0xBEBAFECA:
-    print(f"  {sys.argv[1]}: FAT")
 else:
     print(f"  {sys.argv[1]}: magic={hex(m)}")
 PY
@@ -60,8 +58,6 @@ for ARCH in $ARCHS; do
             -I src -I src/Core -I src/Sources \
             -c "$f" -o "$o"
     done
-    echo "--- 目标文件头（首个 .o）---"
-    hdr "$(ls "$OBJ"/*.o | head -1)"
 
     echo "===== 链接 $ARCH ====="
     OUT="build/PetDFY.$ARCH.dylib"
@@ -72,24 +68,22 @@ for ARCH in $ARCHS; do
         $FRAMEWORKS \
         -o "$OUT" "$OBJ"/*.o ; then
         echo "链接 OK: $ARCH"
-        # ld64.lld 会把 arm64e 输出写成 subtype=0（而 .o 是 subtype=0x2，确为 arm64e ABI）。
-        # 按 Apple ld64 的约定规范化为 0x80000002（arm64e + ptrauth ABI v0），
-        # 否则打包架构只能是 iphoneos-arm64，arm64e 设备需用 Patcher 改包才能装。
-        if [ "$ARCH" = "arm64e" ]; then
-            python3 - "$OUT" <<'PY'
-import struct, sys
-p = sys.argv[1]
-d = bytearray(open(p, "rb").read())
-ct, cs = struct.unpack_from("<II", d, 4)
-if ct == 0x0100000C and cs != 0x80000002:
-    struct.pack_into("<I", d, 8, 0x80000002)
-    open(p, "wb").write(bytes(d))
-    print(f"  normalized subtype: {hex(cs)} -> 0x80000002")
-else:
-    print(f"  subtype already {hex(cs)}")
-PY
-        fi
         hdr "$OUT"
+        # 真实性质检：arm64e 必须有 PAC 指令，否则丢弃该切片（假 arm64e 会加载失败）
+        if [ "$ARCH" = "arm64e" ]; then
+            PAC=$(python3 - "$OUT" <<'PY'
+import sys
+d = open(sys.argv[1], "rb").read()
+print(d.count(b"\x7f\x23\x03\xd5") + d.count(b"\xff\x23\x03\xd5"))
+PY
+)
+            echo "  PAC 指令数: $PAC"
+            if [ "$PAC" = "0" ]; then
+                echo "  WARN: 该切片没有 PAC 指令，不是真 arm64e，丢弃" >&2
+                rm -f "$OUT"
+                continue
+            fi
+        fi
         SLICES="$SLICES $OUT"
     else
         echo "WARN: $ARCH 链接失败，跳过" >&2
@@ -99,58 +93,43 @@ done
 
 [ -n "$SLICES" ] || { echo "所有切片均链接失败" >&2; exit 1; }
 
-echo "===== 组装 fat（自行构造，不依赖 lipo 的子类型判定）====="
+echo "===== 组装 fat ====="
 # shellcheck disable=SC2086
 python3 - build/PetDFY.dylib $SLICES <<'PY'
 import struct, sys, os
 
 out = sys.argv[1]
 inputs = sys.argv[2:]
-
-slices = []
+entries = []
 for p in inputs:
     d = open(p, "rb").read()
     ct, cs = struct.unpack_from("<II", d, 4)
-    slices.append({"path": p, "ct": ct, "cs": cs, "data": d})
-    print(f"  slice {os.path.basename(p)}: cputype={hex(ct)} subtype={hex(cs)} size={len(d)}")
+    entries.append({"path": p, "ct": ct, "cs": cs, "data": d})
+    print(f"  {os.path.basename(p)}: cputype={hex(ct)} subtype={hex(cs)}")
 
-# 去重：同 (ct,cs) 只保留一个；arm64e(0x80000002) 优先
-uniq = {}
-for s in slices:
-    key = (s["ct"], s["cs"])
-    if key in uniq:
-        print(f"  跳过重复架构 {key}: {os.path.basename(s['path'])}")
-        continue
-    uniq[key] = s
-
-if len(uniq) == 1:
-    only = list(uniq.values())[0]
-    open(out, "wb").write(only["data"])
-    print(f"  单切片输出 -> {out}")
+if len(entries) == 1:
+    open(out, "wb").write(entries[0]["data"])
+    print(f"  单切片 -> {out}")
     sys.exit(0)
 
 ALIGN = 14
 align_bytes = 1 << ALIGN
-entries = list(uniq.values())
-header_size = 8 + 20 * len(entries)
-
-offset = header_size
+header = 8 + 20 * len(entries)
+offset = header
 offsets = []
-for s in entries:
-    pad = (-offset) % align_bytes
-    offset += pad
+for e in entries:
+    offset += (-offset) % align_bytes
     offsets.append(offset)
-    offset += len(s["data"])
+    offset += len(e["data"])
 
-buf = bytearray()
-buf += struct.pack(">II", 0xCAFEBABE, len(entries))
-for s, off in zip(entries, offsets):
-    buf += struct.pack(">IIIII", s["ct"], s["cs"], off, len(s["data"]), ALIGN)
-for s, off in zip(entries, offsets):
+buf = bytearray(struct.pack(">II", 0xCAFEBABE, len(entries)))
+for e, off in zip(entries, offsets):
+    buf += struct.pack(">IIIII", e["ct"], e["cs"], off, len(e["data"]), ALIGN)
+for e, off in zip(entries, offsets):
     buf += b"\x00" * (off - len(buf))
-    buf += s["data"]
+    buf += e["data"]
 open(out, "wb").write(bytes(buf))
-print(f"  fat 输出 -> {out} ({len(buf)} bytes, {len(entries)} slices)")
+print(f"  fat -> {out} ({len(buf)} bytes, {len(entries)} slices)")
 PY
 
 ls -la build/PetDFY.dylib

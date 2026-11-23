@@ -113,32 +113,22 @@ else
   echo "  !! 未找到 PetDFYPrefs.bundle/Root.plist"
 fi
 
-echo "== 依据实际切片设置包架构 =="
-ARCH_SUFFIX=$(python3 - "$DL/PetDFY.dylib" <<'PY'
+echo "== 设置包架构标签 =="
+# 设备侧 dpkg 只接受 iphoneos-arm64e；包内是 arm64 切片（arm64e 设备可正常加载）。
+# 需要别的标签时用 PKG_ARCH 覆盖。
+ARCH_SUFFIX="${PKG_ARCH:-arm64e}"
+echo "  Architecture: iphoneos-${ARCH_SUFFIX}"
+python3 - "$DL/PetDFY.dylib" <<'PY'
 import struct, sys
 d = open(sys.argv[1], "rb").read()
-magic = struct.unpack_from("<I", d, 0)[0]
-if magic == 0xBEBAFECA:
+m = struct.unpack_from("<I", d, 0)[0]
+if m == 0xBEBAFECA:
     n = struct.unpack_from(">I", d, 4)[0]
-    names = []
-    for i in range(n):
-        ct = struct.unpack_from(">5I", d, 8 + i * 20)[0]
-        names.append({0x0100000C: "arm64e" if False else "arm64"}.get(ct, "other"))
-    # fat 里有 arm64 就可能同时含 arm64e，用 subtype 判断
-    subs = []
-    for i in range(n):
-        ct, cs = struct.unpack_from(">II", d, 8 + i * 20)
-        subs.append((ct, cs))
-    has_arm64e = any(ct == 0x0100000C and cs == 0x80000002 for ct, cs in subs)
-    print("arm64e" if has_arm64e else "arm64")
-elif magic == 0xFEEDFACF:
-    ct, cs = struct.unpack_from("<II", d, 4)
-    print("arm64e" if (ct == 0x0100000C and cs == 0x80000002) else "arm64")
+    subs = [hex(struct.unpack_from(">I", d, 8 + i * 20 + 4)[0]) for i in range(n)]
+    print("  dylib slices:", subs)
 else:
-    print("arm64")
+    print("  dylib thin subtype:", hex(struct.unpack_from("<I", d, 8)[0]))
 PY
-)
-echo "detected arch: iphoneos-$ARCH_SUFFIX"
 
 CTRL="$WORK/layout/DEBIAN/control"
 if [ -f "$CTRL" ]; then
@@ -171,6 +161,39 @@ PY
 
   echo "---- control ----"
   cat "$CTRL"
+fi
+
+echo "== 给 postinst 追加 jbroot 镜像逻辑（RootHide 注入路径兜底） =="
+POSTINST="$WORK/layout/DEBIAN/postinst"
+if [ -f "$POSTINST" ]; then
+  python3 - "$POSTINST" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+extra = """
+# --- PetDFY: 把 dylib 同时镜像进 jbroot，覆盖 RootHide 注入路径 ---
+for real in /var/containers/Bundle/Application/.jbroot-* \\
+            /var/containers/Bundle/Application/*/.jbroot-* \\
+            /.jbroot-* /var/jb; do
+  [ -d "$real" ] || continue
+  [ -L "$real" ] && continue
+  tgt="$real/Library/MobileSubstrate/DynamicLibraries"
+  mkdir -p "$tgt" 2>/dev/null || continue
+  cp -f /Library/MobileSubstrate/DynamicLibraries/PetDFY.dylib "$tgt/PetDFY.dylib" 2>/dev/null || true
+  cp -f /Library/MobileSubstrate/DynamicLibraries/PetDFY.plist "$tgt/PetDFY.plist" 2>/dev/null || true
+  echo "PetDFY: mirrored dylib into $tgt" >&2
+done
+"""
+idx = s.rfind("exit 0")
+if idx != -1:
+    s = s[:idx] + extra + "\n" + s[idx:]
+else:
+    s = s + "\n" + extra
+open(p, "w", encoding="utf-8").write(s)
+print("  postinst patched")
+PY
+else
+  echo "  警告: 没有 postinst，跳过" >&2
 fi
 
 echo "== 打包 =="

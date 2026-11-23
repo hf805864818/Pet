@@ -87,6 +87,7 @@ extern void dispatch_block_cancel(dispatch_block_t block);
 #import "PDZipExtract.h"
 #import "PDDiag.h"
 #import "PDDiagnostics.h"
+#import "PDToast.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -321,6 +322,25 @@ static BOOL PDInstallCombinedArchive(void) {
     }
     // 已经装过同一份包：直接返回，避免每秒重复解压。
     if ([note isEqualToString:@"already imported"]) return NO;
+    if ([note isEqualToString:@"no zip in spool"]) {
+        // 每 60 秒最多提示一次，避免每秒刷屏
+        static NSTimeInterval lastWarn = 0;
+        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+        if (now - lastWarn > 60) {
+            lastWarn = now;
+            NSArray *spool = [PDAssetInstaller spoolDirectories];
+            NSMutableString *list = [NSMutableString string];
+            NSFileManager *lfm = [NSFileManager defaultManager];
+            for (NSString *d in spool) {
+                NSArray *kids = [lfm contentsOfDirectoryAtPath:d error:NULL];
+                if (kids) [list appendFormat:@"  ✓ %@\n", d];
+            }
+            PDShowToast([NSString stringWithFormat:
+                @"没有找到待导入的素材 ZIP\n\n已扫描目录:\n%@\n请确认导入后在下列目录出现 .zip 文件。",
+                list.length ? list : @"（投递目录都不存在）"], 12);
+        }
+        return NO;
+    }
     if (note.length && ![note isEqualToString:@"no zip in spool"]) {
         NSLog(@"[PetDFY.Import] in-process install declined: %@; trying external unzip", note);
     }
@@ -506,6 +526,17 @@ static BOOL PDInstallCombinedArchive(void) {
 
     _started = YES;
     _pendingEntrance = YES;
+
+    // 诊断：确认 dylib 已注入并运行（每次启动一次，3 秒消失）
+    {
+        static BOOL showedOnce = NO;
+        if (!showedOnce) {
+            showedOnce = YES;
+            PDShowToast([NSString stringWithFormat:
+                @"PetDFY 插件已加载\n进程: SpringBoard (pid %d)\n素材根: %@\n\n若导入后无反应，请把屏幕内容截图给我。",
+                (int)getpid(), PDResourceBundlePath()], 6);
+        }
+    }
 
     [self applyAppearance];
     [self layoutPet];
