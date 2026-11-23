@@ -346,9 +346,9 @@ static NSString *const kPDAssetStateFileName = @".asset-state";
                                         @"root": primary ?: @"",
                                         @"files": @(n)}];
 
+    NSString *msgText = [NSString stringWithFormat:@"installed %ld files -> %@", (long)n, primary];
     PDRecordImportResult(zipPath, YES, msgText, n);
     if (installedRoot) *installedRoot = primary;
-    NSString *msgText = [NSString stringWithFormat:@"installed %ld files -> %@", (long)n, primary];
     if (message) *message = msgText;
     PDDiagLog(@"%@", msgText);
     return YES;
